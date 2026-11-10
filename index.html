@@ -33,10 +33,10 @@
     }
 
     .app {
-      width: 900px;
-      height: 900px;
+      width: min(900px, 100%);
+      min-height: 900px;
       display: grid;
-      grid-template-columns: 560px 1fr;
+      grid-template-columns: minmax(0, 560px) minmax(0, 1fr);
       gap: 14px;
     }
 
@@ -141,8 +141,10 @@
     }
 
     canvas {
-      width: 520px;
-      height: 800px;
+      width: min(520px, 100%);
+      height: auto;
+      aspect-ratio: 520 / 800;
+      touch-action: none;
       border-radius: 14px;
       display: block;
       outline: none;
@@ -151,10 +153,13 @@
     }
 
     @media (max-width: 900px) {
-      body {
-        place-items: start center;
-        overflow: auto;
+      body { place-items: start center; }
+      .app {
+        min-height: 0;
+        grid-template-columns: minmax(0, 1fr);
       }
+      .sidebar { grid-template-rows: auto; }
+      .panel { min-width: 0; }
     }
   </style>
 </head>
@@ -219,7 +224,22 @@
     let baseSpeed = 2.8;
     const BEST_KEY = 'sky-hopper-best-score';
 
-    let best = Number(localStorage.getItem(BEST_KEY) || 0);
+    function readBest() {
+      try {
+        const value = Number(localStorage.getItem(BEST_KEY));
+        return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+      } catch {
+        return 0;
+      }
+    }
+
+    function saveBest() {
+      try { localStorage.setItem(BEST_KEY, String(best)); } catch {
+        // Storage may be blocked or full; the session score still works.
+      }
+    }
+
+    let best = readBest();
     bestEl.textContent = String(best);
 
     let bird;
@@ -230,7 +250,12 @@
     let paused = false;
     let animationId = null;
     let frame = 0;
-    let speedTimer = null;
+    // Preserve the original 60 Hz tuning on every display.
+    const STEP_MS = 1000 / 60;
+    const SPEED_INTERVAL_STEPS = 300;
+    let speedSteps = 0;
+    let lastTime = null;
+    let accumulator = 0;
 
     function resetBird() {
       bird = {
@@ -245,56 +270,55 @@
     function updateHud() {
       scoreEl.textContent = String(score);
       bestEl.textContent = String(best);
+      pauseBtn.textContent = paused ? 'Resume' : 'Pause';
       statusEl.textContent = gameOver ? 'Game Over' : paused ? 'Paused' : gameStarted ? `Playing (${baseSpeed.toFixed(1)}x)` : 'Ready';
     }
 
-    function stopSpeedTimer() {
-      if (speedTimer) {
-        clearInterval(speedTimer);
-        speedTimer = null;
-      }
+    function stopLoop() {
+      cancelAnimationFrame(animationId);
+      animationId = null;
+      lastTime = null;
+      accumulator = 0;
     }
 
-    function startSpeedTimer() {
-      stopSpeedTimer();
-      speedTimer = setInterval(() => {
-        if (!gameStarted || gameOver || paused) return;
-        baseSpeed += 0.35;
-        updateHud();
-      }, 5000);
+    function resumeLoop() {
+      stopLoop();
+      animationId = requestAnimationFrame(loop);
     }
 
     function resetGame() {
-      stopSpeedTimer();
+      stopLoop();
       baseSpeed = 2.8;
       resetBird();
       pipes = [];
       score = 0;
       frame = 0;
+      speedSteps = 0;
       gameStarted = false;
       gameOver = false;
       paused = false;
       updateHud();
       draw();
-      canvas.focus();
+      canvas.focus({ preventScroll: true });
     }
 
     function startGame() {
-      stopSpeedTimer();
+      stopLoop();
       baseSpeed = 2.8;
       resetBird();
       pipes = [];
       score = 0;
       frame = 0;
+      speedSteps = 0;
       gameStarted = true;
       gameOver = false;
       paused = false;
       spawnPipe();
       updateHud();
-      startSpeedTimer();
-      cancelAnimationFrame(animationId);
-      animationId = requestAnimationFrame(loop);
-      canvas.focus();
+      bird.vy = FLAP;
+      bird.tilt = -0.5;
+      resumeLoop();
+      canvas.focus({ preventScroll: true });
     }
 
     function spawnPipe() {
@@ -329,43 +353,84 @@
         spawnPipe();
       }
 
-      for (const pipe of pipes) {
-        pipe.x -= baseSpeed;
+      for (const pipe of pipes) pipe.x -= baseSpeed;
 
-        if (!pipe.scored && pipe.x + PIPE_W < bird.x) {
+      const beak = birdBeak();
+      const minY = Math.min(bird.y - bird.r, ...beak.map(p => p.y));
+      const maxY = Math.max(bird.y + bird.r, ...beak.map(p => p.y));
+      if (minY <= 0 || maxY >= HEIGHT - GROUND_H ||
+          pipes.some(pipe => pipeRects(pipe).some(rect => birdHitsRect(rect, beak)))) {
+        lose();
+        return;
+      }
+
+      const birdLeft = Math.min(bird.x - bird.r, ...beak.map(p => p.x));
+      for (const pipe of pipes) {
+        // Include the visible cap and the whole bird, after collision checks.
+        if (!pipe.scored && pipe.x + PIPE_W + 6 < birdLeft) {
           pipe.scored = true;
           score++;
           if (score > best) {
             best = score;
-            localStorage.setItem(BEST_KEY, String(best));
+            saveBest();
           }
           updateHud();
         }
       }
-
-      pipes = pipes.filter(pipe => pipe.x + PIPE_W > -20);
-
-      if (bird.y + bird.r >= HEIGHT - GROUND_H || bird.y - bird.r <= 0) {
-        lose();
-      }
-
-      for (const pipe of pipes) {
-        const withinX = bird.x + bird.r > pipe.x && bird.x - bird.r < pipe.x + PIPE_W;
-        const hitsTop = bird.y - bird.r < pipe.top;
-        const hitsBottom = bird.y + bird.r > pipe.bottomY;
-        if (withinX && (hitsTop || hitsBottom)) {
-          lose();
-        }
+      pipes = pipes.filter(pipe => pipe.x + PIPE_W + 6 > -20);
+      speedSteps++;
+      if (speedSteps >= SPEED_INTERVAL_STEPS) {
+        speedSteps -= SPEED_INTERVAL_STEPS;
+        baseSpeed += 0.35;
+        updateHud();
       }
     }
 
+    function birdBeak() {
+      const cos = Math.cos(bird.tilt);
+      const sin = Math.sin(bird.tilt);
+      return [[14, 0], [28, -4], [14, 6]].map(([x, y]) => ({
+        x: bird.x + x * cos - y * sin,
+        y: bird.y + x * sin + y * cos
+      }));
+    }
+
+    function pipeRects(pipe) {
+      return [
+        { x: pipe.x, y: 0, w: PIPE_W, h: pipe.top },
+        { x: pipe.x - 6, y: pipe.top - 16, w: PIPE_W + 12, h: 16 },
+        { x: pipe.x, y: pipe.bottomY, w: PIPE_W, h: HEIGHT - GROUND_H - pipe.bottomY },
+        { x: pipe.x - 6, y: pipe.bottomY, w: PIPE_W + 12, h: 16 }
+      ];
+    }
+
+    function birdHitsRect(rect, beak) {
+      const nearestX = Math.max(rect.x, Math.min(bird.x, rect.x + rect.w));
+      const nearestY = Math.max(rect.y, Math.min(bird.y, rect.y + rect.h));
+      if ((bird.x - nearestX) ** 2 + (bird.y - nearestY) ** 2 <= bird.r ** 2) return true;
+
+      // Separating-axis test for the rotated triangular beak and pipe rectangle.
+      const corners = [
+        { x: rect.x, y: rect.y }, { x: rect.x + rect.w, y: rect.y },
+        { x: rect.x + rect.w, y: rect.y + rect.h }, { x: rect.x, y: rect.y + rect.h }
+      ];
+      const axes = [{ x: 1, y: 0 }, { x: 0, y: 1 }];
+      for (let i = 0; i < beak.length; i++) {
+        const a = beak[i], b = beak[(i + 1) % beak.length];
+        axes.push({ x: -(b.y - a.y), y: b.x - a.x });
+      }
+      return axes.every(axis => {
+        const a = beak.map(p => p.x * axis.x + p.y * axis.y);
+        const b = corners.map(p => p.x * axis.x + p.y * axis.y);
+        return Math.max(...a) >= Math.min(...b) && Math.max(...b) >= Math.min(...a);
+      });
+    }
+
     function lose() {
-      stopSpeedTimer();
+      stopLoop();
       gameOver = true;
       gameStarted = false;
       updateHud();
-      cancelAnimationFrame(animationId);
-      draw();
     }
 
     function drawBackground() {
@@ -437,14 +502,20 @@
     }
 
     function drawScore() {
+      ctx.save();
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
       ctx.fillStyle = 'rgba(15,23,42,0.4)';
       ctx.fillRect(18, 18, 108, 54);
       ctx.fillStyle = 'white';
       ctx.font = 'bold 30px Inter, sans-serif';
       ctx.fillText(String(score), 34, 54);
+      ctx.restore();
     }
 
     function drawOverlay(title, subtitle) {
+      ctx.save();
+      ctx.textBaseline = 'alphabetic';
       ctx.fillStyle = 'rgba(0,0,0,0.42)';
       ctx.fillRect(0, 0, WIDTH, HEIGHT);
       ctx.fillStyle = '#ffffff';
@@ -453,6 +524,7 @@
       ctx.fillText(title, WIDTH / 2, HEIGHT / 2 - 24);
       ctx.font = '20px Inter, sans-serif';
       ctx.fillText(subtitle, WIDTH / 2, HEIGHT / 2 + 20);
+      ctx.restore();
     }
 
     function draw() {
@@ -474,56 +546,68 @@
       }
     }
 
-    function loop() {
-      if (paused || gameOver) return;
-      update();
+    function loop(timestamp) {
+      animationId = null;
+      if (!gameStarted || paused || gameOver) return;
+      if (lastTime === null) lastTime = timestamp;
+      // Bound catch-up work after a stall, rather than freezing the browser.
+      accumulator += Math.min(Math.max(timestamp - lastTime, 0), 250);
+      lastTime = timestamp;
+      while (accumulator + 1e-7 >= STEP_MS && !gameOver) {
+        accumulator -= STEP_MS;
+        update();
+      }
       draw();
-      animationId = requestAnimationFrame(loop);
+      if (!gameOver && !paused) animationId = requestAnimationFrame(loop);
+    }
+
+    function setPaused(value) {
+      if (!gameStarted || gameOver || paused === value) return;
+      if (!value && document.hidden) return;
+      paused = value;
+      if (paused) stopLoop();
+      else resumeLoop();
+      updateHud();
+      draw();
     }
 
     function togglePause() {
-      if (!gameStarted || gameOver) return;
-      paused = !paused;
-      updateHud();
-      if (!paused) {
-        startSpeedTimer();
-        cancelAnimationFrame(animationId);
-        animationId = requestAnimationFrame(loop);
-      } else {
-        stopSpeedTimer();
-        cancelAnimationFrame(animationId);
-        draw();
-      }
+      setPaused(!paused);
     }
 
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) setPaused(true);
+      // Returning to the tab leaves the game paused until explicitly resumed.
+    });
+
     document.addEventListener('keydown', (e) => {
-      if (e.key === ' ' || e.key === 'ArrowUp') {
+      const key = e.key.toLowerCase();
+      if (![' ', 'arrowup', 'p', 'enter'].includes(key)) return;
+      if (key === 'enter' && gameOver) {
         e.preventDefault();
+        if (!e.repeat) startGame();
+        return;
+      }
+      // Keep native keyboard activation for focused buttons.
+      if (e.target instanceof HTMLButtonElement && (key === ' ' || key === 'enter')) {
+        if (e.repeat) e.preventDefault();
+        return;
+      }
+      e.preventDefault();
+      if (e.repeat) return;
+      if (key === ' ' || key === 'arrowup') {
         flap();
         draw();
-      }
-      if (e.key === 'p' || e.key === 'P') {
-        e.preventDefault();
-        togglePause();
-      }
-      if (gameOver && e.key === 'Enter') {
-        e.preventDefault();
-        startGame();
-      }
+      } else if (key === 'p') togglePause();
     });
 
-    canvas.addEventListener('click', () => {
-      canvas.focus();
-      flap();
-      draw();
-    });
-
-    canvas.addEventListener('touchstart', (e) => {
+    canvas.addEventListener('pointerdown', (e) => {
+      if (!e.isPrimary || e.button !== 0) return;
       e.preventDefault();
-      canvas.focus();
+      canvas.focus({ preventScroll: true });
       flap();
       draw();
-    }, { passive: false });
+    });
 
     startBtn.addEventListener('click', startGame);
     pauseBtn.addEventListener('click', togglePause);
