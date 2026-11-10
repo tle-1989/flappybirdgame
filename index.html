@@ -164,6 +164,50 @@
       border: 1px solid rgba(255,255,255,0.1);
     }
 
+    /* Dusk sky, mint obstacles, and warm gold accents. */
+    :root { --text: #eef6f4; --accent: #f5ca70; --panel: #122a30; }
+    body {
+      background: radial-gradient(ellipse at 15% 10%, #22454b 0, transparent 55%),
+        radial-gradient(ellipse at 95% 85%, #273444 0, transparent 50%), #0b191f;
+      padding: 32px 20px;
+    }
+    .app { gap: 20px; min-height: 0; }
+    .panel, .card {
+      border-color: rgba(185, 225, 218, 0.12);
+      background: linear-gradient(145deg, #193238, #11272e);
+      box-shadow: 0 20px 60px #0003, inset 0 1px 0 #ffffff08;
+      border-radius: 22px;
+    }
+    .panel { padding: 18px; background: #10252c; align-self: start; }
+    .sidebar { gap: 14px; }
+    .card { padding: 20px; }
+    h1 { font-size: 0.88rem; letter-spacing: 0.04em; }
+    .sidebar > .card:first-child h1 { font-size: 2rem; letter-spacing: -0.055em; margin-bottom: 10px; }
+    .eyebrow { color: #93c9bd; font-size: 0.65rem; font-weight: 800; letter-spacing: 0.18em; margin-bottom: 8px; }
+    .sub, .note { color: #acc4c7; font-size: 0.82rem; line-height: 1.6; }
+    .stats { gap: 6px; }
+    .stat { background: #071c234f; padding: 10px 12px; font-size: 0.8rem; }
+    .stat strong:first-child { font-weight: 500; color: #acc4c7; }
+    .stat strong:last-child { font-variant-numeric: tabular-nums; }
+    button { border-radius: 12px; padding: 12px 14px; font-size: 0.8rem; background: #f5ca70; }
+    button:not(:disabled) { transition: background 140ms ease, box-shadow 140ms ease; }
+    button:not(:disabled):hover { background: #ffdc97; box-shadow: 0 4px 16px #f5ca701c; }
+    button.secondary { background: #29464d; color: #def3ed; }
+    button.secondary:hover { background: #35555c; }
+    input { background: #0b222a; border-color: #36545b; border-radius: 12px; font-size: 0.85rem; }
+    input::placeholder { color: #86a4a9; }
+    :is(button, input, canvas):focus-visible { outline: 2px solid #a5e5d4; outline-offset: 4px; }
+    .leaderboard { margin: 14px 0; }
+    .leaderboard li { padding: 9px 0; border-bottom: 1px solid #b9e1da12; }
+    .leaderboard li::marker { color: #93c9bd; font-size: 0.8rem; font-weight: 800; }
+    .leaderboard li:first-child::marker { color: #f5ca70; }
+    .leaderboard-entry { font-size: 0.85rem; }
+    .leaderboard-form label { font-size: 0.75rem; color: #acc4c7; }
+    .controls { font-size: 0.8rem; }
+    .kbd { background: #0c242c; color: #d3e9e4; border-color: #b9e1da1a; }
+    canvas { border-radius: 16px; border-color: #c0ead91f; background: #cde7df; }
+    @media (prefers-reduced-motion: reduce) { button:not(:disabled) { transition: none; } }
+
     @media (max-width: 900px) {
       body { place-items: start center; }
       .app {
@@ -183,6 +227,7 @@
 
     <div class="sidebar">
       <div class="card">
+        <div class="eyebrow">ARCADE / 01</div>
         <h1>Sky Hopper</h1>
         <div class="sub">A Flappy Bird-style game for the browser. Tap, click, or press space to flap.</div>
         <div class="stats">
@@ -334,6 +379,12 @@
 
     const WIDTH = canvas.width;
     const HEIGHT = canvas.height;
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = WIDTH * pixelRatio;
+    canvas.height = HEIGHT * pixelRatio;
+    ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let landscape = null;
     const GROUND_H = 90;
     const PIPE_W = 84;
     const PIPE_GAP = 190;
@@ -560,96 +611,121 @@
     }
 
     function drawBackground() {
-      ctx.clearRect(0, 0, WIDTH, HEIGHT);
+      // Cache the detailed static scenery; only moving objects redraw each frame.
+      if (!landscape) {
+        landscape = document.createElement('canvas');
+        landscape.width = WIDTH * pixelRatio;
+        landscape.height = HEIGHT * pixelRatio;
+        const scene = landscape.getContext('2d');
+        scene.scale(pixelRatio, pixelRatio);
+        const sky = scene.createLinearGradient(0, 0, 0, HEIGHT - GROUND_H);
+        sky.addColorStop(0, '#83b9c6');
+        sky.addColorStop(0.55, '#cae2db');
+        sky.addColorStop(1, '#f7dfb0');
+        scene.fillStyle = sky;
+        scene.fillRect(0, 0, WIDTH, HEIGHT);
 
-      ctx.fillStyle = 'rgba(255,255,255,0.5)';
-      drawCloud(90, 120, 34);
-      drawCloud(250, 180, 26);
-      drawCloud(430, 130, 30);
+        const glow = scene.createRadialGradient(395, 160, 5, 395, 160, 150);
+        glow.addColorStop(0, '#fff2cfaa'); glow.addColorStop(1, '#fff2cf00');
+        scene.fillStyle = glow; scene.fillRect(230, 0, 290, 330);
+        scene.fillStyle = '#fff0ce'; scene.beginPath(); scene.arc(395, 160, 38, 0, Math.PI * 2); scene.fill();
+        scene.fillStyle = '#ffffff75';
+        drawCloud(85, 160, 26, scene); drawCloud(260, 235, 18, scene);
+        drawCloud(450, 300, 23, scene);
 
-      ctx.fillStyle = '#84cc16';
-      ctx.fillRect(0, HEIGHT - GROUND_H, WIDTH, GROUND_H);
-      ctx.fillStyle = '#92400e';
-      ctx.fillRect(0, HEIGHT - 24, WIDTH, 24);
+        // Broad, quiet shapes keep the obstacles easy to read.
+        scene.fillStyle = '#91b8b4'; scene.beginPath(); scene.moveTo(0, 570);
+        scene.bezierCurveTo(100, 425, 145, 480, 240, 570);
+        scene.bezierCurveTo(350, 405, 420, 480, 520, 535);
+        scene.lineTo(520, 710); scene.lineTo(0, 710); scene.fill();
+        scene.fillStyle = '#629d98'; scene.beginPath(); scene.moveTo(0, 630);
+        scene.bezierCurveTo(130, 545, 200, 610, 285, 640);
+        scene.bezierCurveTo(385, 520, 460, 590, 520, 610);
+        scene.lineTo(520, 710); scene.lineTo(0, 710); scene.fill();
+        scene.fillStyle = '#397a76'; scene.beginPath(); scene.moveTo(0, 685);
+        scene.bezierCurveTo(160, 630, 300, 700, 520, 655);
+        scene.lineTo(520, 710); scene.lineTo(0, 710); scene.fill();
+
+        const ground = scene.createLinearGradient(0, 710, 0, 800);
+        ground.addColorStop(0, '#255a56'); ground.addColorStop(1, '#173d3e');
+        scene.fillStyle = ground; scene.fillRect(0, 710, WIDTH, GROUND_H);
+        scene.fillStyle = '#b8d48e'; scene.fillRect(0, 710, WIDTH, 5);
+        scene.fillStyle = '#7fad79'; scene.fillRect(0, 715, WIDTH, 5);
+        scene.strokeStyle = '#b5d6b81c'; scene.lineWidth = 1;
+        for (let x = -30; x < WIDTH; x += 28) {
+          scene.beginPath(); scene.moveTo(x, 740); scene.lineTo(x + 28, 768); scene.stroke();
+        }
+        scene.fillStyle = '#d6e9c66b';
+        for (let x = 12; x < WIDTH; x += 37) scene.fillRect(x, 727, 3, 2);
+      }
+      ctx.drawImage(landscape, 0, 0, WIDTH, HEIGHT);
     }
 
-    function drawCloud(x, y, r) {
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.arc(x + r, y + 6, r * 0.8, 0, Math.PI * 2);
-      ctx.arc(x - r, y + 8, r * 0.7, 0, Math.PI * 2);
-      ctx.fill();
+    function drawCloud(x, y, r, target = ctx) {
+      target.beginPath();
+      target.ellipse(x, y, r * 1.8, r * 0.6, 0, 0, Math.PI * 2);
+      target.ellipse(x - r * 0.45, y - r * 0.45, r * 0.8, r * 0.8, 0, 0, Math.PI * 2);
+      target.ellipse(x + r * 0.5, y - r * 0.2, r, r * 0.7, 0, 0, Math.PI * 2);
+      target.fill();
     }
 
     function drawPipes() {
+      ctx.save();
       for (const pipe of pipes) {
-        ctx.fillStyle = '#22c55e';
-        ctx.fillRect(pipe.x, 0, PIPE_W, pipe.top);
-        ctx.fillRect(pipe.x, pipe.bottomY, PIPE_W, HEIGHT - pipe.bottomY - GROUND_H);
-
-        ctx.fillStyle = '#16a34a';
-        ctx.fillRect(pipe.x - 6, pipe.top - 16, PIPE_W + 12, 16);
-        ctx.fillRect(pipe.x - 6, pipe.bottomY, PIPE_W + 12, 16);
+        const surface = ctx.createLinearGradient(pipe.x, 0, pipe.x + PIPE_W, 0);
+        surface.addColorStop(0, '#337c70'); surface.addColorStop(0.25, '#8ac8a6');
+        surface.addColorStop(0.65, '#63ad91'); surface.addColorStop(1, '#2b7066');
+        for (const rect of pipeRects(pipe)) {
+          ctx.fillStyle = surface; ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+          ctx.strokeStyle = '#255e58'; ctx.lineWidth = 2;
+          ctx.strokeRect(rect.x + 1, rect.y + 1, rect.w - 2, rect.h - 2);
+          ctx.fillStyle = '#d9f3c838'; ctx.fillRect(rect.x + 6, rect.y + 2, 4, rect.h - 4);
+        }
+        ctx.fillStyle = '#e1edb783';
+        ctx.fillRect(pipe.x - 4, pipe.top - 15, PIPE_W + 8, 3);
+        ctx.fillRect(pipe.x - 4, pipe.bottomY + 1, PIPE_W + 8, 3);
       }
+      ctx.restore();
     }
 
     function drawBird() {
-      ctx.save();
-      ctx.translate(bird.x, bird.y);
-      ctx.rotate(bird.tilt);
-
-      ctx.fillStyle = '#fbbf24';
-      ctx.beginPath();
-      ctx.arc(0, 0, bird.r, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = '#fff';
-      ctx.beginPath();
-      ctx.arc(6, -6, 6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#111827';
-      ctx.beginPath();
-      ctx.arc(8, -6, 2.5, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = '#fb7185';
-      ctx.beginPath();
-      ctx.moveTo(14, 0);
-      ctx.lineTo(28, -4);
-      ctx.lineTo(14, 6);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.fillStyle = '#f59e0b';
-      ctx.beginPath();
-      ctx.ellipse(-4, 4, 10, 6, -0.4, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.save(); ctx.translate(bird.x, bird.y); ctx.rotate(bird.tilt);
+      const body = ctx.createLinearGradient(-10, -18, 10, 18);
+      body.addColorStop(0, '#ffeaa5'); body.addColorStop(0.5, '#f6c45d'); body.addColorStop(1, '#dc9145');
+      ctx.fillStyle = body; ctx.beginPath(); ctx.arc(0, 0, bird.r - 0.7, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#8d653c'; ctx.lineWidth = 1.4; ctx.stroke();
+      ctx.fillStyle = '#fff1c0'; ctx.beginPath(); ctx.ellipse(2, 7, 10, 7, -0.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#d99045'; ctx.beginPath();
+      const wingAngle = -0.4 + (reduceMotion || !gameStarted || paused ? 0 : Math.sin(frame * 0.65) * 0.25);
+      ctx.ellipse(-6, 4, 9, 5.5, wingAngle, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fffdf1'; ctx.beginPath(); ctx.arc(6, -6, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#193c43'; ctx.beginPath(); ctx.arc(8, -6, 2.8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(8.7, -7.1, 0.9, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#dc7950'; ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(28, -4); ctx.lineTo(14, 6); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#f1ab72'; ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(28, -4); ctx.lineTo(14, 2); ctx.closePath(); ctx.fill();
       ctx.restore();
     }
 
     function drawScore() {
-      ctx.save();
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'alphabetic';
-      ctx.fillStyle = 'rgba(15,23,42,0.4)';
-      ctx.fillRect(18, 18, 108, 54);
-      ctx.fillStyle = 'white';
-      ctx.font = 'bold 30px Inter, sans-serif';
-      ctx.fillText(String(score), 34, 54);
+      ctx.save(); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.fillStyle = '#12343bd9'; ctx.beginPath(); ctx.roundRect(20, 20, 110, 72, 16); ctx.fill();
+      ctx.fillStyle = '#b8d9d0'; ctx.font = '600 10px system-ui, sans-serif'; ctx.fillText('SCORE', 36, 41);
+      ctx.fillStyle = '#fff3cb'; ctx.font = 'bold 30px system-ui, sans-serif'; ctx.fillText(String(score), 34, 76, 80);
       ctx.restore();
     }
 
     function drawOverlay(title, subtitle) {
-      ctx.save();
-      ctx.textBaseline = 'alphabetic';
-      ctx.fillStyle = 'rgba(0,0,0,0.42)';
-      ctx.fillRect(0, 0, WIDTH, HEIGHT);
-      ctx.fillStyle = '#ffffff';
-      ctx.textAlign = 'center';
-      ctx.font = 'bold 40px Inter, sans-serif';
-      ctx.fillText(title, WIDTH / 2, HEIGHT / 2 - 24);
-      ctx.font = '20px Inter, sans-serif';
-      ctx.fillText(subtitle, WIDTH / 2, HEIGHT / 2 + 20);
+      ctx.save(); ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'center';
+      ctx.fillStyle = '#102c3540'; ctx.fillRect(0, 0, WIDTH, HEIGHT);
+      ctx.fillStyle = '#102d35'; ctx.beginPath(); ctx.roundRect(36, 282, WIDTH - 72, 214, 24); ctx.fill();
+      ctx.strokeStyle = '#d2e9d833'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.fillStyle = '#a8d7c6'; ctx.font = '600 11px system-ui, sans-serif';
+      ctx.fillText('S K Y   H O P P E R', WIDTH / 2, 322);
+      ctx.fillStyle = '#fff1cb'; ctx.font = 'bold 32px system-ui, sans-serif';
+      ctx.fillText(title, WIDTH / 2, 371, WIDTH - 110);
+      ctx.fillStyle = '#bad2d0'; ctx.font = '15px system-ui, sans-serif';
+      ctx.fillText(subtitle, WIDTH / 2, 405, WIDTH - 110);
+      ctx.fillStyle = '#f5ca70'; ctx.beginPath(); ctx.roundRect(WIDTH / 2 - 32, 445, 64, 4, 2); ctx.fill();
       ctx.restore();
     }
 
@@ -660,7 +736,7 @@
       drawScore();
 
       if (!gameStarted && !gameOver) {
-        drawOverlay('Press Space to Start', 'Click, tap, or press space to flap');
+        drawOverlay('Ready for takeoff?', 'Click, tap, or press Space to flap');
       }
 
       if (paused) {
