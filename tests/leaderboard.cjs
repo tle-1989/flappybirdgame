@@ -8,8 +8,8 @@ const path = require('node:path');
 
 (async () => {
   const html = fs.readFileSync(path.resolve(__dirname, '../index.html'), 'utf8')
-    .replace("projectUrl: ''", "projectUrl: 'https://example.supabase.co'")
-    .replace("publishableKey: ''", "publishableKey: 'sb_publishable_test'");
+    .replace(/projectUrl: '[^']*'/, "projectUrl: 'https://example.supabase.co'")
+    .replace(/publishableKey: '[^']*'/, "publishableKey: 'sb_publishable_test'");
   const server = http.createServer((req, res) => { res.setHeader('Content-Type', 'text/html'); res.end(html); });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const url = `http://127.0.0.1:${server.address().port}/`;

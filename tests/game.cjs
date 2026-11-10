@@ -10,7 +10,9 @@ const path = require('node:path');
 (async () => {
   const server = http.createServer((req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.end(fs.readFileSync(path.resolve(__dirname, '../index.html')));
+    // Isolate physics checks from external database availability.
+    res.end(fs.readFileSync(path.resolve(__dirname, '../index.html'), 'utf8')
+      .replace(/projectUrl: '[^']*'/, "projectUrl: ''"));
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const url = `http://127.0.0.1:${server.address().port}/`;

@@ -1,4 +1,5 @@
--- Run once in the Supabase project's SQL Editor. Safe to rerun.
+-- Run in the project's SQL Editor as the project owner. Safe to rerun.
+begin;
 create table if not exists public.high_scores (
   id bigint generated always as identity primary key,
   run_id uuid not null unique,
@@ -9,8 +10,8 @@ create table if not exists public.high_scores (
 create index if not exists high_scores_ranking on public.high_scores (score desc, id asc);
 alter table public.high_scores enable row level security;
 -- Clients can only use the two restricted RPC functions, not mutate the table.
-revoke all on public.high_scores from anon, authenticated;
-revoke all on sequence public.high_scores_id_seq from anon, authenticated;
+revoke all on public.high_scores from public, anon, authenticated;
+revoke all on sequence public.high_scores_id_seq from public, anon, authenticated;
 
 create or replace function public.get_top_scores()
 returns table (player_name text, score integer)
@@ -40,3 +41,5 @@ revoke all on function public.get_top_scores() from public;
 revoke all on function public.submit_score(uuid, text, integer) from public;
 grant execute on function public.get_top_scores() to anon, authenticated;
 grant execute on function public.submit_score(uuid, text, integer) to anon, authenticated;
+
+commit;
