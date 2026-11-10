@@ -56,7 +56,7 @@
 
     .sidebar {
       display: grid;
-      grid-template-rows: auto auto 1fr;
+      grid-template-rows: auto auto auto 1fr;
       gap: 12px;
       min-height: 0;
     }
@@ -116,6 +116,18 @@
       color: white;
       margin-right: 6px;
     }
+
+    .leaderboard { padding-left: 28px; margin: 12px 0; }
+    .leaderboard li { padding: 6px 0; overflow-wrap: anywhere; }
+    .leaderboard-entry { display: flex; justify-content: space-between; gap: 12px; }
+    .leaderboard-entry strong { color: var(--accent); }
+    .leaderboard-form { display: grid; gap: 8px; }
+    input {
+      width: 100%; min-width: 0; padding: 10px 12px; border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.2); background: #111827;
+      color: var(--text); font: inherit;
+    }
+    button:disabled { opacity: 0.55; cursor: default; }
 
     .buttons {
       display: flex;
@@ -185,6 +197,18 @@
       </div>
 
       <div class="card">
+        <h1>Top 3 High Scores</h1>
+        <ol id="leaderboard" class="leaderboard" aria-label="Top three high scores"></ol>
+        <p id="leaderboardStatus" class="note" role="status">Loading scores…</p>
+        <form id="leaderboardForm" class="leaderboard-form">
+          <label for="playerName">Your name</label>
+          <input id="playerName" name="playerName" maxlength="24" required autocomplete="nickname" placeholder="Enter your name" />
+          <button id="submitScoreBtn" type="submit" disabled>Submit score</button>
+          <div id="submissionStatus" class="note" role="status">Finish a game to submit your score.</div>
+        </form>
+      </div>
+
+      <div class="card">
         <h1>Controls</h1>
         <div class="controls">
           <div><span class="kbd">Space</span> Flap</div>
@@ -212,6 +236,101 @@
     const statusEl = document.getElementById('status');
     const startBtn = document.getElementById('startBtn');
     const pauseBtn = document.getElementById('pauseBtn');
+
+    // Public browser settings only. Never use a secret or service_role key here.
+    const LEADERBOARD_CONFIG = {
+      projectUrl: '',
+      publishableKey: ''
+    };
+    const leaderboardEl = document.getElementById('leaderboard');
+    const leaderboardStatus = document.getElementById('leaderboardStatus');
+    const submissionStatus = document.getElementById('submissionStatus');
+    const submitScoreBtn = document.getElementById('submitScoreBtn');
+    const playerName = document.getElementById('playerName');
+    let completedRun = null;
+    let runId = null;
+    let submitting = false;
+    let leaderboardRequest = 0;
+
+    function leaderboardConfigured() {
+      return /^https:\/\/[^/]+\.supabase\.co$/.test(LEADERBOARD_CONFIG.projectUrl) &&
+        Boolean(LEADERBOARD_CONFIG.publishableKey);
+    }
+
+    async function leaderboardRpc(name, body) {
+      const response = await fetch(`${LEADERBOARD_CONFIG.projectUrl}/rest/v1/rpc/${name}`, {
+        method: 'POST',
+        headers: { apikey: LEADERBOARD_CONFIG.publishableKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(10000)
+      });
+      if (!response.ok) throw new Error('Leaderboard request failed');
+      return response.status === 204 ? null : response.json();
+    }
+
+    async function loadLeaderboard() {
+      const request = ++leaderboardRequest;
+      if (!leaderboardConfigured()) {
+        leaderboardStatus.textContent = 'Shared high scores are not connected yet.';
+        return;
+      }
+      try {
+        const rows = await leaderboardRpc('get_top_scores', {});
+        if (request !== leaderboardRequest) return;
+        if (!Array.isArray(rows) || rows.some(row => typeof row.player_name !== 'string' ||
+            !Number.isSafeInteger(row.score) || row.score < 1)) throw new Error('Invalid scores');
+        leaderboardEl.replaceChildren();
+        for (const row of rows.slice(0, 3)) {
+          const item = document.createElement('li');
+          const entry = document.createElement('div');
+          entry.className = 'leaderboard-entry';
+          const name = document.createElement('span');
+          name.textContent = row.player_name;
+          const value = document.createElement('strong');
+          value.textContent = String(row.score);
+          entry.append(name, value); item.append(entry); leaderboardEl.append(item);
+        }
+        leaderboardStatus.textContent = rows.length ? 'Shared across all players.' : 'No scores yet. Be the first!';
+      } catch {
+        if (request === leaderboardRequest) leaderboardStatus.textContent = 'Could not refresh high scores. Try again later.';
+      }
+    }
+
+    function updateSubmission() {
+      submitScoreBtn.disabled = !leaderboardConfigured() || !completedRun ||
+        completedRun.score < 1 || completedRun.submitted || submitting;
+      submitScoreBtn.textContent = submitting ? 'Saving…' : 'Submit score';
+      if (!submitting) submissionStatus.textContent = completedRun?.submitted ? 'Score saved!' :
+        completedRun?.score > 0 ? `Your score: ${completedRun.score}. Enter your name to save it.` :
+        'Finish a game with at least 1 point to submit your score.';
+    }
+
+    document.getElementById('leaderboardForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const name = playerName.value.trim();
+      if (submitScoreBtn.disabled) return;
+      if (!name || [...name].length > 24) {
+        submissionStatus.textContent = 'Enter a name between 1 and 24 characters.';
+        return;
+      }
+      const run = completedRun;
+      submitting = true; updateSubmission();
+      submissionStatus.textContent = 'Saving your score…';
+      try {
+        await leaderboardRpc('submit_score', { p_run_id: run.id, p_player_name: name, p_score: run.score });
+        run.submitted = true;
+        await loadLeaderboard();
+      } catch {
+        submissionStatus.textContent = 'Could not save your score. Please try again.';
+        return;
+      } finally {
+        submitting = false;
+        submitScoreBtn.disabled = !leaderboardConfigured() || !completedRun ||
+          completedRun.score < 1 || completedRun.submitted;
+        submitScoreBtn.textContent = 'Submit score';
+      }
+      updateSubmission();
+    });
 
     const WIDTH = canvas.width;
     const HEIGHT = canvas.height;
@@ -287,6 +406,8 @@
     }
 
     function resetGame() {
+      completedRun = null;
+      updateSubmission();
       stopLoop();
       baseSpeed = 2.8;
       resetBird();
@@ -303,6 +424,9 @@
     }
 
     function startGame() {
+      runId = crypto.randomUUID();
+      completedRun = null;
+      updateSubmission();
       stopLoop();
       baseSpeed = 2.8;
       resetBird();
@@ -427,6 +551,8 @@
     }
 
     function lose() {
+      completedRun = { id: runId, score, submitted: false };
+      updateSubmission();
       stopLoop();
       gameOver = true;
       gameStarted = false;
@@ -577,10 +703,12 @@
 
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) setPaused(true);
+      else loadLeaderboard();
       // Returning to the tab leaves the game paused until explicitly resumed.
     });
 
     document.addEventListener('keydown', (e) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target.isContentEditable) return;
       const key = e.key.toLowerCase();
       if (![' ', 'arrowup', 'p', 'enter'].includes(key)) return;
       if (key === 'enter' && gameOver) {
@@ -613,6 +741,7 @@
     pauseBtn.addEventListener('click', togglePause);
 
     resetGame();
+    loadLeaderboard();
   </script>
 </body>
 </html>
