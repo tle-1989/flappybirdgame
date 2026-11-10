@@ -33,10 +33,10 @@
     }
 
     .app {
-      width: 900px;
-      height: 900px;
+      width: min(900px, 100%);
+      min-height: 900px;
       display: grid;
-      grid-template-columns: 560px 1fr;
+      grid-template-columns: minmax(0, 560px) minmax(0, 1fr);
       gap: 14px;
     }
 
@@ -56,7 +56,7 @@
 
     .sidebar {
       display: grid;
-      grid-template-rows: auto auto 1fr;
+      grid-template-rows: auto auto auto 1fr;
       gap: 12px;
       min-height: 0;
     }
@@ -117,6 +117,18 @@
       margin-right: 6px;
     }
 
+    .leaderboard { padding-left: 28px; margin: 12px 0; }
+    .leaderboard li { padding: 6px 0; overflow-wrap: anywhere; }
+    .leaderboard-entry { display: flex; justify-content: space-between; gap: 12px; }
+    .leaderboard-entry strong { color: var(--accent); }
+    .leaderboard-form { display: grid; gap: 8px; }
+    input {
+      width: 100%; min-width: 0; padding: 10px 12px; border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.2); background: #111827;
+      color: var(--text); font: inherit;
+    }
+    button:disabled { opacity: 0.55; cursor: default; }
+
     .buttons {
       display: flex;
       gap: 10px;
@@ -141,8 +153,10 @@
     }
 
     canvas {
-      width: 520px;
-      height: 800px;
+      width: min(520px, 100%);
+      height: auto;
+      aspect-ratio: 520 / 800;
+      touch-action: none;
       border-radius: 14px;
       display: block;
       outline: none;
@@ -151,10 +165,13 @@
     }
 
     @media (max-width: 900px) {
-      body {
-        place-items: start center;
-        overflow: auto;
+      body { place-items: start center; }
+      .app {
+        min-height: 0;
+        grid-template-columns: minmax(0, 1fr);
       }
+      .sidebar { grid-template-rows: auto; }
+      .panel { min-width: 0; }
     }
   </style>
 </head>
@@ -177,6 +194,18 @@
           <button id="startBtn">Start / Restart</button>
           <button id="pauseBtn" class="secondary">Pause</button>
         </div>
+      </div>
+
+      <div class="card">
+        <h1>Top 3 High Scores</h1>
+        <ol id="leaderboard" class="leaderboard" aria-label="Top three high scores"></ol>
+        <p id="leaderboardStatus" class="note" role="status">Loading scores…</p>
+        <form id="leaderboardForm" class="leaderboard-form">
+          <label for="playerName">Your name</label>
+          <input id="playerName" name="playerName" maxlength="24" required autocomplete="nickname" placeholder="Enter your name" />
+          <button id="submitScoreBtn" type="submit" disabled>Submit score</button>
+          <div id="submissionStatus" class="note" role="status">Finish a game to submit your score.</div>
+        </form>
       </div>
 
       <div class="card">
@@ -208,6 +237,101 @@
     const startBtn = document.getElementById('startBtn');
     const pauseBtn = document.getElementById('pauseBtn');
 
+    // Public browser settings only. Never use a secret or service_role key here.
+    const LEADERBOARD_CONFIG = {
+      projectUrl: 'https://kicnjdwtvmafnhyaycoh.supabase.co',
+      publishableKey: 'sb_publishable_48598ZFIW2LL5fLK4JIVcQ_bGHQK-al'
+    };
+    const leaderboardEl = document.getElementById('leaderboard');
+    const leaderboardStatus = document.getElementById('leaderboardStatus');
+    const submissionStatus = document.getElementById('submissionStatus');
+    const submitScoreBtn = document.getElementById('submitScoreBtn');
+    const playerName = document.getElementById('playerName');
+    let completedRun = null;
+    let runId = null;
+    let submitting = false;
+    let leaderboardRequest = 0;
+
+    function leaderboardConfigured() {
+      return /^https:\/\/[^/]+\.supabase\.co$/.test(LEADERBOARD_CONFIG.projectUrl) &&
+        Boolean(LEADERBOARD_CONFIG.publishableKey);
+    }
+
+    async function leaderboardRpc(name, body) {
+      const response = await fetch(`${LEADERBOARD_CONFIG.projectUrl}/rest/v1/rpc/${name}`, {
+        method: 'POST',
+        headers: { apikey: LEADERBOARD_CONFIG.publishableKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(10000)
+      });
+      if (!response.ok) throw new Error('Leaderboard request failed');
+      return response.status === 204 ? null : response.json();
+    }
+
+    async function loadLeaderboard() {
+      const request = ++leaderboardRequest;
+      if (!leaderboardConfigured()) {
+        leaderboardStatus.textContent = 'Shared high scores are not connected yet.';
+        return;
+      }
+      try {
+        const rows = await leaderboardRpc('get_top_scores', {});
+        if (request !== leaderboardRequest) return;
+        if (!Array.isArray(rows) || rows.some(row => typeof row.player_name !== 'string' ||
+            !Number.isSafeInteger(row.score) || row.score < 1)) throw new Error('Invalid scores');
+        leaderboardEl.replaceChildren();
+        for (const row of rows.slice(0, 3)) {
+          const item = document.createElement('li');
+          const entry = document.createElement('div');
+          entry.className = 'leaderboard-entry';
+          const name = document.createElement('span');
+          name.textContent = row.player_name;
+          const value = document.createElement('strong');
+          value.textContent = String(row.score);
+          entry.append(name, value); item.append(entry); leaderboardEl.append(item);
+        }
+        leaderboardStatus.textContent = rows.length ? 'Shared across all players.' : 'No scores yet. Be the first!';
+      } catch {
+        if (request === leaderboardRequest) leaderboardStatus.textContent = 'Could not refresh high scores. Try again later.';
+      }
+    }
+
+    function updateSubmission() {
+      submitScoreBtn.disabled = !leaderboardConfigured() || !completedRun ||
+        completedRun.score < 1 || completedRun.submitted || submitting;
+      submitScoreBtn.textContent = submitting ? 'Saving…' : 'Submit score';
+      if (!submitting) submissionStatus.textContent = completedRun?.submitted ? 'Score saved!' :
+        completedRun?.score > 0 ? `Your score: ${completedRun.score}. Enter your name to save it.` :
+        'Finish a game with at least 1 point to submit your score.';
+    }
+
+    document.getElementById('leaderboardForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const name = playerName.value.trim();
+      if (submitScoreBtn.disabled) return;
+      if (!name || [...name].length > 24) {
+        submissionStatus.textContent = 'Enter a name between 1 and 24 characters.';
+        return;
+      }
+      const run = completedRun;
+      submitting = true; updateSubmission();
+      submissionStatus.textContent = 'Saving your score…';
+      try {
+        await leaderboardRpc('submit_score', { p_run_id: run.id, p_player_name: name, p_score: run.score });
+        run.submitted = true;
+        await loadLeaderboard();
+      } catch {
+        submissionStatus.textContent = 'Could not save your score. Please try again.';
+        return;
+      } finally {
+        submitting = false;
+        submitScoreBtn.disabled = !leaderboardConfigured() || !completedRun ||
+          completedRun.score < 1 || completedRun.submitted;
+        submitScoreBtn.textContent = 'Submit score';
+      }
+      updateSubmission();
+    });
+
     const WIDTH = canvas.width;
     const HEIGHT = canvas.height;
     const GROUND_H = 90;
@@ -219,7 +343,22 @@
     let baseSpeed = 2.8;
     const BEST_KEY = 'sky-hopper-best-score';
 
-    let best = Number(localStorage.getItem(BEST_KEY) || 0);
+    function readBest() {
+      try {
+        const value = Number(localStorage.getItem(BEST_KEY));
+        return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+      } catch {
+        return 0;
+      }
+    }
+
+    function saveBest() {
+      try { localStorage.setItem(BEST_KEY, String(best)); } catch {
+        // Storage may be blocked or full; the session score still works.
+      }
+    }
+
+    let best = readBest();
     bestEl.textContent = String(best);
 
     let bird;
@@ -230,7 +369,12 @@
     let paused = false;
     let animationId = null;
     let frame = 0;
-    let speedTimer = null;
+    // Preserve the original 60 Hz tuning on every display.
+    const STEP_MS = 1000 / 60;
+    const SPEED_INTERVAL_STEPS = 300;
+    let speedSteps = 0;
+    let lastTime = null;
+    let accumulator = 0;
 
     function resetBird() {
       bird = {
@@ -245,56 +389,60 @@
     function updateHud() {
       scoreEl.textContent = String(score);
       bestEl.textContent = String(best);
+      pauseBtn.textContent = paused ? 'Resume' : 'Pause';
       statusEl.textContent = gameOver ? 'Game Over' : paused ? 'Paused' : gameStarted ? `Playing (${baseSpeed.toFixed(1)}x)` : 'Ready';
     }
 
-    function stopSpeedTimer() {
-      if (speedTimer) {
-        clearInterval(speedTimer);
-        speedTimer = null;
-      }
+    function stopLoop() {
+      cancelAnimationFrame(animationId);
+      animationId = null;
+      lastTime = null;
+      accumulator = 0;
     }
 
-    function startSpeedTimer() {
-      stopSpeedTimer();
-      speedTimer = setInterval(() => {
-        if (!gameStarted || gameOver || paused) return;
-        baseSpeed += 0.35;
-        updateHud();
-      }, 5000);
+    function resumeLoop() {
+      stopLoop();
+      animationId = requestAnimationFrame(loop);
     }
 
     function resetGame() {
-      stopSpeedTimer();
+      completedRun = null;
+      updateSubmission();
+      stopLoop();
       baseSpeed = 2.8;
       resetBird();
       pipes = [];
       score = 0;
       frame = 0;
+      speedSteps = 0;
       gameStarted = false;
       gameOver = false;
       paused = false;
       updateHud();
       draw();
-      canvas.focus();
+      canvas.focus({ preventScroll: true });
     }
 
     function startGame() {
-      stopSpeedTimer();
+      runId = crypto.randomUUID();
+      completedRun = null;
+      updateSubmission();
+      stopLoop();
       baseSpeed = 2.8;
       resetBird();
       pipes = [];
       score = 0;
       frame = 0;
+      speedSteps = 0;
       gameStarted = true;
       gameOver = false;
       paused = false;
       spawnPipe();
       updateHud();
-      startSpeedTimer();
-      cancelAnimationFrame(animationId);
-      animationId = requestAnimationFrame(loop);
-      canvas.focus();
+      bird.vy = FLAP;
+      bird.tilt = -0.5;
+      resumeLoop();
+      canvas.focus({ preventScroll: true });
     }
 
     function spawnPipe() {
@@ -329,43 +477,86 @@
         spawnPipe();
       }
 
-      for (const pipe of pipes) {
-        pipe.x -= baseSpeed;
+      for (const pipe of pipes) pipe.x -= baseSpeed;
 
-        if (!pipe.scored && pipe.x + PIPE_W < bird.x) {
+      const beak = birdBeak();
+      const minY = Math.min(bird.y - bird.r, ...beak.map(p => p.y));
+      const maxY = Math.max(bird.y + bird.r, ...beak.map(p => p.y));
+      if (minY <= 0 || maxY >= HEIGHT - GROUND_H ||
+          pipes.some(pipe => pipeRects(pipe).some(rect => birdHitsRect(rect, beak)))) {
+        lose();
+        return;
+      }
+
+      const birdLeft = Math.min(bird.x - bird.r, ...beak.map(p => p.x));
+      for (const pipe of pipes) {
+        // Include the visible cap and the whole bird, after collision checks.
+        if (!pipe.scored && pipe.x + PIPE_W + 6 < birdLeft) {
           pipe.scored = true;
           score++;
           if (score > best) {
             best = score;
-            localStorage.setItem(BEST_KEY, String(best));
+            saveBest();
           }
           updateHud();
         }
       }
-
-      pipes = pipes.filter(pipe => pipe.x + PIPE_W > -20);
-
-      if (bird.y + bird.r >= HEIGHT - GROUND_H || bird.y - bird.r <= 0) {
-        lose();
-      }
-
-      for (const pipe of pipes) {
-        const withinX = bird.x + bird.r > pipe.x && bird.x - bird.r < pipe.x + PIPE_W;
-        const hitsTop = bird.y - bird.r < pipe.top;
-        const hitsBottom = bird.y + bird.r > pipe.bottomY;
-        if (withinX && (hitsTop || hitsBottom)) {
-          lose();
-        }
+      pipes = pipes.filter(pipe => pipe.x + PIPE_W + 6 > -20);
+      speedSteps++;
+      if (speedSteps >= SPEED_INTERVAL_STEPS) {
+        speedSteps -= SPEED_INTERVAL_STEPS;
+        baseSpeed += 0.35;
+        updateHud();
       }
     }
 
+    function birdBeak() {
+      const cos = Math.cos(bird.tilt);
+      const sin = Math.sin(bird.tilt);
+      return [[14, 0], [28, -4], [14, 6]].map(([x, y]) => ({
+        x: bird.x + x * cos - y * sin,
+        y: bird.y + x * sin + y * cos
+      }));
+    }
+
+    function pipeRects(pipe) {
+      return [
+        { x: pipe.x, y: 0, w: PIPE_W, h: pipe.top },
+        { x: pipe.x - 6, y: pipe.top - 16, w: PIPE_W + 12, h: 16 },
+        { x: pipe.x, y: pipe.bottomY, w: PIPE_W, h: HEIGHT - GROUND_H - pipe.bottomY },
+        { x: pipe.x - 6, y: pipe.bottomY, w: PIPE_W + 12, h: 16 }
+      ];
+    }
+
+    function birdHitsRect(rect, beak) {
+      const nearestX = Math.max(rect.x, Math.min(bird.x, rect.x + rect.w));
+      const nearestY = Math.max(rect.y, Math.min(bird.y, rect.y + rect.h));
+      if ((bird.x - nearestX) ** 2 + (bird.y - nearestY) ** 2 <= bird.r ** 2) return true;
+
+      // Separating-axis test for the rotated triangular beak and pipe rectangle.
+      const corners = [
+        { x: rect.x, y: rect.y }, { x: rect.x + rect.w, y: rect.y },
+        { x: rect.x + rect.w, y: rect.y + rect.h }, { x: rect.x, y: rect.y + rect.h }
+      ];
+      const axes = [{ x: 1, y: 0 }, { x: 0, y: 1 }];
+      for (let i = 0; i < beak.length; i++) {
+        const a = beak[i], b = beak[(i + 1) % beak.length];
+        axes.push({ x: -(b.y - a.y), y: b.x - a.x });
+      }
+      return axes.every(axis => {
+        const a = beak.map(p => p.x * axis.x + p.y * axis.y);
+        const b = corners.map(p => p.x * axis.x + p.y * axis.y);
+        return Math.max(...a) >= Math.min(...b) && Math.max(...b) >= Math.min(...a);
+      });
+    }
+
     function lose() {
-      stopSpeedTimer();
+      completedRun = { id: runId, score, submitted: false };
+      updateSubmission();
+      stopLoop();
       gameOver = true;
       gameStarted = false;
       updateHud();
-      cancelAnimationFrame(animationId);
-      draw();
     }
 
     function drawBackground() {
@@ -437,14 +628,20 @@
     }
 
     function drawScore() {
+      ctx.save();
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
       ctx.fillStyle = 'rgba(15,23,42,0.4)';
       ctx.fillRect(18, 18, 108, 54);
       ctx.fillStyle = 'white';
       ctx.font = 'bold 30px Inter, sans-serif';
       ctx.fillText(String(score), 34, 54);
+      ctx.restore();
     }
 
     function drawOverlay(title, subtitle) {
+      ctx.save();
+      ctx.textBaseline = 'alphabetic';
       ctx.fillStyle = 'rgba(0,0,0,0.42)';
       ctx.fillRect(0, 0, WIDTH, HEIGHT);
       ctx.fillStyle = '#ffffff';
@@ -453,6 +650,7 @@
       ctx.fillText(title, WIDTH / 2, HEIGHT / 2 - 24);
       ctx.font = '20px Inter, sans-serif';
       ctx.fillText(subtitle, WIDTH / 2, HEIGHT / 2 + 20);
+      ctx.restore();
     }
 
     function draw() {
@@ -474,61 +672,76 @@
       }
     }
 
-    function loop() {
-      if (paused || gameOver) return;
-      update();
+    function loop(timestamp) {
+      animationId = null;
+      if (!gameStarted || paused || gameOver) return;
+      if (lastTime === null) lastTime = timestamp;
+      // Bound catch-up work after a stall, rather than freezing the browser.
+      accumulator += Math.min(Math.max(timestamp - lastTime, 0), 250);
+      lastTime = timestamp;
+      while (accumulator + 1e-7 >= STEP_MS && !gameOver) {
+        accumulator -= STEP_MS;
+        update();
+      }
       draw();
-      animationId = requestAnimationFrame(loop);
+      if (!gameOver && !paused) animationId = requestAnimationFrame(loop);
+    }
+
+    function setPaused(value) {
+      if (!gameStarted || gameOver || paused === value) return;
+      if (!value && document.hidden) return;
+      paused = value;
+      if (paused) stopLoop();
+      else resumeLoop();
+      updateHud();
+      draw();
     }
 
     function togglePause() {
-      if (!gameStarted || gameOver) return;
-      paused = !paused;
-      updateHud();
-      if (!paused) {
-        startSpeedTimer();
-        cancelAnimationFrame(animationId);
-        animationId = requestAnimationFrame(loop);
-      } else {
-        stopSpeedTimer();
-        cancelAnimationFrame(animationId);
-        draw();
-      }
+      setPaused(!paused);
     }
 
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) setPaused(true);
+      else loadLeaderboard();
+      // Returning to the tab leaves the game paused until explicitly resumed.
+    });
+
     document.addEventListener('keydown', (e) => {
-      if (e.key === ' ' || e.key === 'ArrowUp') {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target.isContentEditable) return;
+      const key = e.key.toLowerCase();
+      if (![' ', 'arrowup', 'p', 'enter'].includes(key)) return;
+      if (key === 'enter' && gameOver) {
         e.preventDefault();
+        if (!e.repeat) startGame();
+        return;
+      }
+      // Keep native keyboard activation for focused buttons.
+      if (e.target instanceof HTMLButtonElement && (key === ' ' || key === 'enter')) {
+        if (e.repeat) e.preventDefault();
+        return;
+      }
+      e.preventDefault();
+      if (e.repeat) return;
+      if (key === ' ' || key === 'arrowup') {
         flap();
         draw();
-      }
-      if (e.key === 'p' || e.key === 'P') {
-        e.preventDefault();
-        togglePause();
-      }
-      if (gameOver && e.key === 'Enter') {
-        e.preventDefault();
-        startGame();
-      }
+      } else if (key === 'p') togglePause();
     });
 
-    canvas.addEventListener('click', () => {
-      canvas.focus();
-      flap();
-      draw();
-    });
-
-    canvas.addEventListener('touchstart', (e) => {
+    canvas.addEventListener('pointerdown', (e) => {
+      if (!e.isPrimary || e.button !== 0) return;
       e.preventDefault();
-      canvas.focus();
+      canvas.focus({ preventScroll: true });
       flap();
       draw();
-    }, { passive: false });
+    });
 
     startBtn.addEventListener('click', startGame);
     pauseBtn.addEventListener('click', togglePause);
 
     resetGame();
+    loadLeaderboard();
   </script>
 </body>
 </html>
