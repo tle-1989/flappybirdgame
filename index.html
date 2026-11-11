@@ -500,6 +500,7 @@
       ctx.restore();
     }
     let frame = 0;
+    let scrollDistance = 0;
     // Preserve the original 60 Hz tuning on every display.
     const STEP_MS = 1000 / 60;
     const SPEED_INTERVAL_STEPS = 300;
@@ -546,6 +547,7 @@
       pipes = [];
       score = 0;
       frame = 0;
+      scrollDistance = 0;
       speedSteps = 0;
       gameStarted = false;
       gameOver = false;
@@ -566,6 +568,7 @@
       pipes = [];
       score = 0;
       frame = 0;
+      scrollDistance = 0;
       speedSteps = 0;
       gameStarted = true;
       gameOver = false;
@@ -610,6 +613,7 @@
         spawnPipe();
       }
 
+      scrollDistance += baseSpeed;
       for (const pipe of pipes) pipe.x -= baseSpeed;
 
       const beak = birdBeak();
@@ -695,13 +699,20 @@
     }
 
     function drawBackground() {
-      // Render natural textures once, independently of gameplay randomness.
+      // Cache cropped, repeating layers once; scrolling only composites images.
       if (!landscape) {
-        landscape = document.createElement('canvas');
-        landscape.width = WIDTH * pixelRatio;
-        landscape.height = HEIGHT * pixelRatio;
-        const scene = landscape.getContext('2d');
-        scene.scale(pixelRatio, pixelRatio);
+        landscape = [];
+        const terrainWidth = WIDTH * 2;
+        const makeLayer = (name, speed, y, height, width = terrainWidth) => {
+          const image = document.createElement('canvas');
+          image.width = width * pixelRatio;
+          image.height = height * pixelRatio;
+          const target = image.getContext('2d');
+          target.setTransform(pixelRatio, 0, 0, pixelRatio, 0, -y * pixelRatio);
+          landscape.push({ name, speed, y, height, width, image });
+          return target;
+        };
+        let scene = makeLayer('sky', 0, 0, HEIGHT, WIDTH);
         const groundY = HEIGHT - GROUND_H;
         let seed = 1989;
         const random = () => {
@@ -721,26 +732,32 @@
         sun.addColorStop(0, '#fff6df'); sun.addColorStop(0.7, '#fff2d4e0'); sun.addColorStop(1, '#fff2d400');
         scene.fillStyle = sun; scene.fillRect(365, 130, 64, 64);
 
+        scene = makeLayer('clouds', 0.04, 0, 430);
         // Overlapping translucent cloud volumes, with warm tops and cooler undersides.
-        for (const cloud of [{ x: 80, y: 158, w: 125 }, { x: 310, y: 267, w: 150 }, { x: 470, y: 350, w: 105 }]) {
+        for (const cloud of [{ x: 80, y: 158, w: 125 }, { x: 310, y: 267, w: 150 }, { x: 470, y: 350, w: 105 }, { x: 710, y: 190, w: 145 }, { x: 940, y: 300, w: 90 }]) {
           for (let i = 0; i < 22; i++) {
             const x = cloud.x + (random() - 0.5) * cloud.w;
             const y = cloud.y + (random() - 0.5) * 14;
             const radius = 15 + random() * 22;
-            scene.save(); scene.translate(x, y); scene.scale(1.6, 0.65);
-            const puff = scene.createRadialGradient(0, -5, 1, 0, 0, radius);
-            puff.addColorStop(0, '#fffaed35'); puff.addColorStop(0.6, '#edf1e923'); puff.addColorStop(1, '#e6ece500');
-            scene.fillStyle = puff; scene.fillRect(-radius, -radius, radius * 2, radius * 2);
-            scene.restore();
+            for (const wrap of [-terrainWidth, 0, terrainWidth]) {
+              scene.save(); scene.translate(x + wrap, y); scene.scale(1.6, 0.65);
+              const puff = scene.createRadialGradient(0, -5, 1, 0, 0, radius);
+              puff.addColorStop(0, '#fffaed35'); puff.addColorStop(0.6, '#edf1e923'); puff.addColorStop(1, '#e6ece500');
+              scene.fillStyle = puff; scene.fillRect(-radius, -radius, radius * 2, radius * 2);
+              scene.restore();
+            }
           }
         }
+        scene = makeLayer('mountains', 0.12, 380, groundY - 380);
         const ridge = (base, height, phase, top, bottom) => {
-          const yAt = x => base + height * (0.52 * Math.sin(x * 0.010 + phase) +
-            0.26 * Math.sin(x * 0.023 + phase * 2) + 0.12 * Math.sin(x * 0.051 + phase) +
-            0.045 * Math.sin(x * 0.13 + phase * 3));
+          // Integer harmonics make both ends meet exactly when the tile wraps.
+          const angle = x => x / terrainWidth * Math.PI * 2;
+          const yAt = x => base + height * (0.52 * Math.sin(angle(x) * 2 + phase) +
+            0.26 * Math.sin(angle(x) * 4 + phase * 2) + 0.12 * Math.sin(angle(x) * 9 + phase) +
+            0.045 * Math.sin(angle(x) * 22 + phase * 3));
           scene.beginPath(); scene.moveTo(-10, groundY);
-          for (let x = -10; x <= WIDTH + 10; x += 5) scene.lineTo(x, yAt(x));
-          scene.lineTo(WIDTH + 10, groundY); scene.closePath();
+          for (let x = -10; x <= terrainWidth + 10; x += 5) scene.lineTo(x, yAt(x));
+          scene.lineTo(terrainWidth + 10, groundY); scene.closePath();
           const shade = scene.createLinearGradient(0, base - height, 0, groundY);
           shade.addColorStop(0, top); shade.addColorStop(1, bottom);
           scene.fillStyle = shade; scene.fill();
@@ -752,38 +769,46 @@
         // Valley haze separates the distant peaks from the water and near shore.
         const haze = scene.createLinearGradient(0, 510, 0, 625);
         haze.addColorStop(0, '#efdfc100'); haze.addColorStop(0.65, '#eddfc14d'); haze.addColorStop(1, '#eddfc100');
-        scene.fillStyle = haze; scene.fillRect(0, 510, WIDTH, 115);
+        scene.fillStyle = haze; scene.fillRect(0, 510, terrainWidth, 115);
+        scene = makeLayer('water', 0.22, 612, groundY - 612);
         const water = scene.createLinearGradient(0, 605, 0, 690);
         water.addColorStop(0, '#b0c3bc'); water.addColorStop(1, '#759c99');
-        scene.fillStyle = water; scene.fillRect(0, 612, WIDTH, 98);
-        for (let i = 0; i < 85; i++) {
-          const x = random() * WIDTH, y = 615 + random() * 80;
-          scene.fillStyle = x > 310 ? '#ffebcb32' : '#e4e5d51b';
+        scene.fillStyle = water; scene.fillRect(0, 612, terrainWidth, groundY - 612);
+        for (let i = 0; i < 170; i++) {
+          const x = random() * terrainWidth, y = 615 + random() * 80;
+          scene.fillStyle = i % 2 ? '#ffebcb32' : '#e4e5d51b';
           scene.fillRect(x, y, 5 + random() * 30, 0.5);
         }
+        scene = makeLayer('shore', 0.45, 580, groundY - 580);
         const shore = ridge(674, 29, 3.3, '#546e59', '#718363');
         // Small conifers provide scale without obscuring the playfield.
-        for (let i = 0; i < 52; i++) {
-          const x = i * 11 + random() * 8;
-          const y = shore(x) + 4;
+        for (let i = 0; i < 95; i++) {
+          const treeX = i * 11 + random() * 8;
+          const y = shore(treeX) + 4;
           const height = 12 + random() * 26;
-          scene.fillStyle = '#3e5e56'; scene.fillRect(x - 0.7, y - height, 1.4, height);
-          for (let tier = 0; tier < 4; tier++) {
-            const tip = y - height + tier * height * 0.17;
-            const half = height * (0.13 + tier * 0.045);
-            scene.fillStyle = tier % 2 ? '#4e6b5a' : '#446253';
-            scene.beginPath(); scene.moveTo(x, tip); scene.lineTo(x - half, tip + height * 0.4);
-            scene.lineTo(x + half, tip + height * 0.4); scene.closePath(); scene.fill();
+          for (const wrap of [-terrainWidth, 0, terrainWidth]) {
+            const x = treeX + wrap;
+            scene.fillStyle = '#3e5e56'; scene.fillRect(x - 0.7, y - height, 1.4, height);
+            for (let tier = 0; tier < 4; tier++) {
+              const tip = y - height + tier * height * 0.17;
+              const half = height * (0.13 + tier * 0.045);
+              scene.fillStyle = tier % 2 ? '#4e6b5a' : '#446253';
+              scene.beginPath(); scene.moveTo(x, tip); scene.lineTo(x - half, tip + height * 0.4);
+              scene.lineTo(x + half, tip + height * 0.4); scene.closePath(); scene.fill();
+            }
           }
         }
         const meadow = scene.createLinearGradient(0, 685, 0, groundY);
         meadow.addColorStop(0, '#83916a'); meadow.addColorStop(1, '#687750');
-        scene.fillStyle = meadow; scene.beginPath(); scene.moveTo(0, 692);
-        scene.bezierCurveTo(130, 675, 295, 709, WIDTH, 686);
-        scene.lineTo(WIDTH, groundY); scene.lineTo(0, groundY); scene.fill();
+        scene.fillStyle = meadow; scene.beginPath(); scene.moveTo(0, groundY);
+        for (let x = 0; x <= terrainWidth; x += 5) {
+          scene.lineTo(x, 692 + Math.sin(x / terrainWidth * Math.PI * 4) * 7);
+        }
+        scene.lineTo(terrainWidth, groundY); scene.closePath(); scene.fill();
 
         // Soil cross-section: turf, compacted earth, roots, fine grain, and stones.
         // All foreground texture stays at/below the unchanged collision boundary.
+        scene = makeLayer('ground', 1, groundY, GROUND_H, WIDTH);
         const earth = scene.createLinearGradient(0, groundY, 0, HEIGHT);
         earth.addColorStop(0, '#756044'); earth.addColorStop(0.2, '#66503b');
         earth.addColorStop(0.65, '#493d32'); earth.addColorStop(1, '#302d29');
@@ -814,7 +839,14 @@
           scene.quadraticCurveTo(x + 2, groundY + 4, x + random() * 4 - 2, groundY + 0.5); scene.stroke();
         }
       }
-      ctx.drawImage(landscape, 0, 0, WIDTH, HEIGHT);
+      for (const layer of landscape) {
+        // Keep the gameplay ground motion, but reduce optional depth motion.
+        const speed = reduceMotion && layer.speed < 1 ? 0 : layer.speed;
+        const offset = (scrollDistance * speed) % layer.width;
+        for (let x = -offset; x < WIDTH; x += layer.width) {
+          ctx.drawImage(layer.image, x, layer.y, layer.width, layer.height);
+        }
+      }
     }
 
     function drawPipes() {
