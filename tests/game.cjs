@@ -55,7 +55,7 @@ const path = require('node:path');
         for (const hz of [30, 60, 120, 144]) {
           startGame(); advanceFrame(0);
           for (let i = 1; i <= Math.floor(hz / 2); i++) advanceFrame(i * 1000 / hz);
-          results.push({ frame, y: bird.y, vy: bird.vy, x: pipes[0].x });
+          results.push({ frame, y: bird.y, vy: bird.vy, x: pipes[0].x, scrollDistance });
         }
         return results;
       });
@@ -66,9 +66,9 @@ const path = require('node:path');
       assert.equal(await page.evaluate(() => bird.vy), -7.6);
       await page.keyboard.press('p');
       assert.equal(await page.locator('#pauseBtn').textContent(), 'Resume');
-      const pausedState = await page.evaluate(() => ({ frame, y: bird.y, speedSteps }));
+      const pausedState = await page.evaluate(() => ({ frame, y: bird.y, speedSteps, scrollDistance }));
       await page.evaluate(() => advanceFrame(10000));
-      assert.deepEqual(await page.evaluate(() => ({ frame, y: bird.y, speedSteps })), pausedState);
+      assert.deepEqual(await page.evaluate(() => ({ frame, y: bird.y, speedSteps, scrollDistance })), pausedState);
       await page.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', repeat: true, bubbles: true })));
       assert.equal(await page.locator('#status').textContent(), 'Paused');
       await page.locator('#pauseBtn').click();
