@@ -695,62 +695,126 @@
     }
 
     function drawBackground() {
-      // Cache the detailed static scenery; only moving objects redraw each frame.
+      // Render natural textures once, independently of gameplay randomness.
       if (!landscape) {
         landscape = document.createElement('canvas');
         landscape.width = WIDTH * pixelRatio;
         landscape.height = HEIGHT * pixelRatio;
         const scene = landscape.getContext('2d');
         scene.scale(pixelRatio, pixelRatio);
-        const sky = scene.createLinearGradient(0, 0, 0, HEIGHT - GROUND_H);
-        sky.addColorStop(0, '#83b9c6');
-        sky.addColorStop(0.55, '#cae2db');
-        sky.addColorStop(1, '#f7dfb0');
-        scene.fillStyle = sky;
-        scene.fillRect(0, 0, WIDTH, HEIGHT);
+        const groundY = HEIGHT - GROUND_H;
+        let seed = 1989;
+        const random = () => {
+          seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+          return seed / 4294967296;
+        };
+        const sky = scene.createLinearGradient(0, 0, 0, groundY);
+        sky.addColorStop(0, '#6f9fb6'); sky.addColorStop(0.45, '#b9d0d2');
+        sky.addColorStop(0.8, '#eadcc2'); sky.addColorStop(1, '#f3debc');
+        scene.fillStyle = sky; scene.fillRect(0, 0, WIDTH, HEIGHT);
 
-        const glow = scene.createRadialGradient(395, 160, 5, 395, 160, 150);
-        glow.addColorStop(0, '#fff2cfaa'); glow.addColorStop(1, '#fff2cf00');
-        scene.fillStyle = glow; scene.fillRect(230, 0, 290, 330);
-        scene.fillStyle = '#fff0ce'; scene.beginPath(); scene.arc(395, 160, 38, 0, Math.PI * 2); scene.fill();
-        scene.fillStyle = '#ffffff75';
-        drawCloud(85, 160, 26, scene); drawCloud(260, 235, 18, scene);
-        drawCloud(450, 300, 23, scene);
+        const sunlight = scene.createRadialGradient(397, 162, 0, 397, 162, 230);
+        sunlight.addColorStop(0, '#fff3d4b0'); sunlight.addColorStop(0.25, '#ffe9c34a');
+        sunlight.addColorStop(1, '#ffe9c300');
+        scene.fillStyle = sunlight; scene.fillRect(140, 0, 380, 420);
+        const sun = scene.createRadialGradient(397, 162, 17, 397, 162, 32);
+        sun.addColorStop(0, '#fff6df'); sun.addColorStop(0.7, '#fff2d4e0'); sun.addColorStop(1, '#fff2d400');
+        scene.fillStyle = sun; scene.fillRect(365, 130, 64, 64);
 
-        // Broad, quiet shapes keep the obstacles easy to read.
-        scene.fillStyle = '#91b8b4'; scene.beginPath(); scene.moveTo(0, 570);
-        scene.bezierCurveTo(100, 425, 145, 480, 240, 570);
-        scene.bezierCurveTo(350, 405, 420, 480, 520, 535);
-        scene.lineTo(520, 710); scene.lineTo(0, 710); scene.fill();
-        scene.fillStyle = '#629d98'; scene.beginPath(); scene.moveTo(0, 630);
-        scene.bezierCurveTo(130, 545, 200, 610, 285, 640);
-        scene.bezierCurveTo(385, 520, 460, 590, 520, 610);
-        scene.lineTo(520, 710); scene.lineTo(0, 710); scene.fill();
-        scene.fillStyle = '#397a76'; scene.beginPath(); scene.moveTo(0, 685);
-        scene.bezierCurveTo(160, 630, 300, 700, 520, 655);
-        scene.lineTo(520, 710); scene.lineTo(0, 710); scene.fill();
-
-        const ground = scene.createLinearGradient(0, 710, 0, 800);
-        ground.addColorStop(0, '#255a56'); ground.addColorStop(1, '#173d3e');
-        scene.fillStyle = ground; scene.fillRect(0, 710, WIDTH, GROUND_H);
-        scene.fillStyle = '#b8d48e'; scene.fillRect(0, 710, WIDTH, 5);
-        scene.fillStyle = '#7fad79'; scene.fillRect(0, 715, WIDTH, 5);
-        scene.strokeStyle = '#b5d6b81c'; scene.lineWidth = 1;
-        for (let x = -30; x < WIDTH; x += 28) {
-          scene.beginPath(); scene.moveTo(x, 740); scene.lineTo(x + 28, 768); scene.stroke();
+        // Overlapping translucent cloud volumes, with warm tops and cooler undersides.
+        for (const cloud of [{ x: 80, y: 158, w: 125 }, { x: 310, y: 267, w: 150 }, { x: 470, y: 350, w: 105 }]) {
+          for (let i = 0; i < 22; i++) {
+            const x = cloud.x + (random() - 0.5) * cloud.w;
+            const y = cloud.y + (random() - 0.5) * 14;
+            const radius = 15 + random() * 22;
+            scene.save(); scene.translate(x, y); scene.scale(1.6, 0.65);
+            const puff = scene.createRadialGradient(0, -5, 1, 0, 0, radius);
+            puff.addColorStop(0, '#fffaed35'); puff.addColorStop(0.6, '#edf1e923'); puff.addColorStop(1, '#e6ece500');
+            scene.fillStyle = puff; scene.fillRect(-radius, -radius, radius * 2, radius * 2);
+            scene.restore();
+          }
         }
-        scene.fillStyle = '#d6e9c66b';
-        for (let x = 12; x < WIDTH; x += 37) scene.fillRect(x, 727, 3, 2);
+        const ridge = (base, height, phase, top, bottom) => {
+          const yAt = x => base + height * (0.52 * Math.sin(x * 0.010 + phase) +
+            0.26 * Math.sin(x * 0.023 + phase * 2) + 0.12 * Math.sin(x * 0.051 + phase) +
+            0.045 * Math.sin(x * 0.13 + phase * 3));
+          scene.beginPath(); scene.moveTo(-10, groundY);
+          for (let x = -10; x <= WIDTH + 10; x += 5) scene.lineTo(x, yAt(x));
+          scene.lineTo(WIDTH + 10, groundY); scene.closePath();
+          const shade = scene.createLinearGradient(0, base - height, 0, groundY);
+          shade.addColorStop(0, top); shade.addColorStop(1, bottom);
+          scene.fillStyle = shade; scene.fill();
+          return yAt;
+        };
+        ridge(470, 66, 1.6, '#8fa4ae', '#c5c9c0');
+        ridge(515, 57, 4.4, '#7d969c', '#b5bfb4');
+        ridge(563, 47, 0.8, '#6e8b8a', '#a6b3a1');
+        // Valley haze separates the distant peaks from the water and near shore.
+        const haze = scene.createLinearGradient(0, 510, 0, 625);
+        haze.addColorStop(0, '#efdfc100'); haze.addColorStop(0.65, '#eddfc14d'); haze.addColorStop(1, '#eddfc100');
+        scene.fillStyle = haze; scene.fillRect(0, 510, WIDTH, 115);
+        const water = scene.createLinearGradient(0, 605, 0, 690);
+        water.addColorStop(0, '#b0c3bc'); water.addColorStop(1, '#759c99');
+        scene.fillStyle = water; scene.fillRect(0, 612, WIDTH, 98);
+        for (let i = 0; i < 85; i++) {
+          const x = random() * WIDTH, y = 615 + random() * 80;
+          scene.fillStyle = x > 310 ? '#ffebcb32' : '#e4e5d51b';
+          scene.fillRect(x, y, 5 + random() * 30, 0.5);
+        }
+        const shore = ridge(674, 29, 3.3, '#546e59', '#718363');
+        // Small conifers provide scale without obscuring the playfield.
+        for (let i = 0; i < 52; i++) {
+          const x = i * 11 + random() * 8;
+          const y = shore(x) + 4;
+          const height = 12 + random() * 26;
+          scene.fillStyle = '#3e5e56'; scene.fillRect(x - 0.7, y - height, 1.4, height);
+          for (let tier = 0; tier < 4; tier++) {
+            const tip = y - height + tier * height * 0.17;
+            const half = height * (0.13 + tier * 0.045);
+            scene.fillStyle = tier % 2 ? '#4e6b5a' : '#446253';
+            scene.beginPath(); scene.moveTo(x, tip); scene.lineTo(x - half, tip + height * 0.4);
+            scene.lineTo(x + half, tip + height * 0.4); scene.closePath(); scene.fill();
+          }
+        }
+        const meadow = scene.createLinearGradient(0, 685, 0, groundY);
+        meadow.addColorStop(0, '#83916a'); meadow.addColorStop(1, '#687750');
+        scene.fillStyle = meadow; scene.beginPath(); scene.moveTo(0, 692);
+        scene.bezierCurveTo(130, 675, 295, 709, WIDTH, 686);
+        scene.lineTo(WIDTH, groundY); scene.lineTo(0, groundY); scene.fill();
+
+        // Soil cross-section: turf, compacted earth, roots, fine grain, and stones.
+        // All foreground texture stays at/below the unchanged collision boundary.
+        const earth = scene.createLinearGradient(0, groundY, 0, HEIGHT);
+        earth.addColorStop(0, '#756044'); earth.addColorStop(0.2, '#66503b');
+        earth.addColorStop(0.65, '#493d32'); earth.addColorStop(1, '#302d29');
+        scene.fillStyle = earth; scene.fillRect(0, groundY, WIDTH, GROUND_H);
+        for (let i = 0; i < 1700; i++) {
+          const x = random() * WIDTH, y = groundY + 7 + random() * (GROUND_H - 7);
+          scene.fillStyle = i % 3 === 0 ? '#c4a77b20' : '#211e1b25';
+          scene.fillRect(x, y, 0.5 + random() * 2, 0.5 + random());
+        }
+        for (let i = 0; i < 45; i++) {
+          const x = random() * WIDTH, y = groundY + 14 + random() * 70;
+          const size = 1 + random() * 3;
+          scene.fillStyle = i % 2 ? '#91857480' : '#b5a38b60';
+          scene.beginPath(); scene.ellipse(x, y, size * 1.5, size, random(), 0, Math.PI * 2); scene.fill();
+        }
+        scene.strokeStyle = '#b59c6b50'; scene.lineWidth = 0.7;
+        for (let i = 0; i < 36; i++) {
+          const x = random() * WIDTH;
+          scene.beginPath(); scene.moveTo(x, groundY + 4);
+          scene.bezierCurveTo(x - 4, groundY + 12, x + 8, groundY + 20, x + 3, groundY + 30 + random() * 15); scene.stroke();
+        }
+        scene.fillStyle = '#3f4e30'; scene.fillRect(0, groundY, WIDTH, 8);
+        for (let x = 0; x < WIDTH; x += 2) {
+          const length = 4 + random() * 8;
+          scene.strokeStyle = ['#9da469', '#7e8b50', '#b4ad75', '#5f743f'][Math.floor(random() * 4)];
+          scene.lineWidth = 1;
+          scene.beginPath(); scene.moveTo(x, groundY + length);
+          scene.quadraticCurveTo(x + 2, groundY + 4, x + random() * 4 - 2, groundY + 0.5); scene.stroke();
+        }
       }
       ctx.drawImage(landscape, 0, 0, WIDTH, HEIGHT);
-    }
-
-    function drawCloud(x, y, r, target = ctx) {
-      target.beginPath();
-      target.ellipse(x, y, r * 1.8, r * 0.6, 0, 0, Math.PI * 2);
-      target.ellipse(x - r * 0.45, y - r * 0.45, r * 0.8, r * 0.8, 0, 0, Math.PI * 2);
-      target.ellipse(x + r * 0.5, y - r * 0.2, r, r * 0.7, 0, 0, Math.PI * 2);
-      target.fill();
     }
 
     function drawPipes() {
