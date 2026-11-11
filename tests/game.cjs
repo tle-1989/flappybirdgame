@@ -25,7 +25,7 @@ const path = require('node:path');
   let checks = 0;
   try {
     for (const viewport of [{ width: 1440, height: 1000 }, { width: 768, height: 1024 }, { width: 390, height: 844 }, { width: 320, height: 568 }]) {
-      const context = await browser.newContext({ viewport, hasTouch: viewport.width < 900 });
+      const context = await browser.newContext({ viewport, hasTouch: viewport.width < 900, deviceScaleFactor: viewport.width < 900 ? 2 : 1 });
       // Control animation timestamps to test refresh rates without wall-clock flakiness.
       await context.addInitScript(() => {
         let nextId = 0;
@@ -41,6 +41,7 @@ const path = require('node:path');
       const errors = []; page.on('pageerror', error => errors.push(error.message));
       await page.goto(url);
       assert.equal(await page.locator('#status').textContent(), 'Ready');
+      assert.equal(await page.evaluate(() => canvas.width), viewport.width < 900 ? 1040 : 520);
       const layout = await page.evaluate(() => {
         const rect = canvas.getBoundingClientRect();
         return { width: document.documentElement.scrollWidth, viewport: innerWidth, ratio: rect.width / rect.height };
