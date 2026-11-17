@@ -414,6 +414,7 @@
 
     let bird;
     let pipes = [];
+    let nextPipeTop = null;
     let score = 0;
     let gameStarted = false;
     let gameOver = false;
@@ -545,6 +546,7 @@
       baseSpeed = 2.8;
       resetBird();
       pipes = [];
+      nextPipeTop = null;
       score = 0;
       frame = 0;
       scrollDistance = 0;
@@ -566,6 +568,7 @@
       baseSpeed = 2.8;
       resetBird();
       pipes = [];
+      nextPipeTop = null;
       score = 0;
       frame = 0;
       scrollDistance = 0;
@@ -581,10 +584,15 @@
       canvas.focus({ preventScroll: true });
     }
 
-    function spawnPipe() {
+    function randomPipeTop() {
       const minTop = 90;
       const maxTop = HEIGHT - GROUND_H - PIPE_GAP - 120;
-      const topH = Math.floor(Math.random() * (maxTop - minTop + 1)) + minTop;
+      return Math.floor(Math.random() * (maxTop - minTop + 1)) + minTop;
+    }
+
+    function spawnPipe() {
+      const topH = nextPipeTop ?? randomPipeTop();
+      nextPipeTop = randomPipeTop();
       pipes.push({
         x: WIDTH + 20,
         top: topH,
@@ -909,6 +917,17 @@
       ctx.restore();
     }
 
+    function drawPipeMarker() {
+      if (!gameStarted || gameOver || nextPipeTop === null) return;
+      // Keep previewing a spawned pipe until its leading cap enters the canvas.
+      const entering = pipes.find(pipe => pipe.x - 6 >= WIDTH);
+      const top = entering ? entering.top : nextPipeTop;
+      ctx.save();
+      ctx.fillStyle = '#000';
+      ctx.fillRect(WIDTH - 1, top + PIPE_GAP / 2, 1, 1);
+      ctx.restore();
+    }
+
     function draw() {
       drawBackground();
       drawPipes();
@@ -927,6 +946,7 @@
       if (gameOver && (!crash || crash.elapsed >= CRASH_DURATION)) {
         drawOverlay('Game Over', 'Press Enter or Start / Restart');
       }
+      drawPipeMarker();
     }
 
     function loop(timestamp) {

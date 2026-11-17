@@ -50,6 +50,55 @@ const path = require('node:path');
       assert.ok(Math.abs(layout.ratio - 520 / 800) < 0.002);
       checks++;
 
+      const marker = await page.evaluate(() => {
+        resetGame();
+        const calls = [];
+        const fill = ctx.fillRect.bind(ctx);
+        ctx.fillRect = (...args) => { calls.push([ctx.fillStyle, ...args]); fill(...args); };
+        const sample = () => {
+          calls.length = 0; drawPipeMarker();
+          return calls.map(call => [...call]);
+        };
+        const ready = sample();
+        startGame();
+        const firstTop = pipes[0].top;
+        const first = sample();
+        pipes[0].x = WIDTH + 6;
+        const edge = sample();
+        pipes[0].x -= 1;
+        const reserved = nextPipeTop;
+        const next = sample();
+        setPaused(true);
+        const paused = sample();
+        setPaused(false);
+        spawnPipe();
+        const spawned = pipes[1].top;
+        const afterSpawn = sample();
+        // Verify actual canvas output at the rightmost logical pixel.
+        draw();
+        const pixel = [...ctx.getImageData((WIDTH - 1) * pixelRatio,
+          (reserved + PIPE_GAP / 2) * pixelRatio, 1, 1).data];
+        lose(); const dead = sample();
+        resetGame(); const reset = sample();
+        startGame(); const restarted = sample();
+        ctx.fillRect = fill;
+        return { ready, first, edge, next, paused, afterSpawn, dead, reset,
+          restarted, firstTop, reserved, spawned, pixel, width: WIDTH, restartTop: pipes[0].top };
+      });
+      const expectedMarker = top => [['#000000', marker.width - 1, top + 95, 1, 1]];
+      assert.deepEqual(marker.ready, []);
+      assert.deepEqual(marker.first, expectedMarker(marker.firstTop));
+      assert.deepEqual(marker.edge, marker.first);
+      assert.deepEqual(marker.next, expectedMarker(marker.reserved));
+      assert.deepEqual(marker.paused, marker.next);
+      assert.equal(marker.spawned, marker.reserved);
+      assert.deepEqual(marker.afterSpawn, marker.next);
+      assert.deepEqual(marker.pixel, [0, 0, 0, 255]);
+      assert.deepEqual(marker.dead, []);
+      assert.deepEqual(marker.reset, []);
+      assert.deepEqual(marker.restarted, expectedMarker(marker.restartTop));
+      checks++;
+
       const timing = await page.evaluate(() => {
         const results = [];
         for (const hz of [30, 60, 120, 144]) {
